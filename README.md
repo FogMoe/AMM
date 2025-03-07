@@ -63,7 +63,7 @@ A Python-based Automated Market Maker (AMM) trading simulation system providing 
 
 ## Screenshots
 
-[Add screenshots here]
+[screenshots](video/demo.mp4)
 
 ## Contributing
 
