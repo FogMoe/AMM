@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h3 class="mb-0">代币交换</h3>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <div class="d-flex justify-content-between">
+                        <span>当前汇率:</span>
+                        <span class="fw-bold">1 Token1 = {{ exchange_rate|round(4) }} Token2</span>
+                    </div>
+                    <div class="mt-2 small">
+                        <span class="text-danger">注意:</span> 交易将收取1%手续费，并根据交易量产生滑点
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>您的Token1余额:</span>
+                        <span class="badge bg-success fs-6">{{ user.token1_balance|round(4) }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>您的Token2余额:</span>
+                        <span class="badge bg-info fs-6">{{ user.token2_balance|round(4) }}</span>
+                    </div>
+                </div>
+                
+                <form method="POST" action="{{ url_for('swap') }}" id="swapForm">
+                    <div class="mb-3">
+                        <label class="form-label">交易类型</label>
+                        <div class="d-flex">
+                            <div class="form-check me-4">
+                                <input class="form-check-input" type="radio" name="swap_type" id="token1ToToken2" value="token1_to_token2" checked>
+                                <label class="form-check-label" for="token1ToToken2">
+                                    Token1 → Token2
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="swap_type" id="token2ToToken1" value="token2_to_token1">
+                                <label class="form-check-label" for="token2ToToken1">
+                                    Token2 → Token1
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="amount" class="form-label">输入数量</label>
+                        <input type="number" class="form-control" id="amount" name="amount" step="0.0001" min="0.0001" required>
+                    </div>
+                    
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <h5 class="card-title">交易预览</h5>
+                            <div id="previewContainer" class="d-none">
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span>输入:</span>
+                                    <span id="inputPreview">-</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span>输出:</span>
+                                    <span id="outputPreview">-</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span>手续费 (1%):</span>
+                                    <span id="feePreview" class="text-danger">-</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span>滑点:</span>
+                                    <span id="slippagePreview" class="text-warning">-</span>
+                                </div>
+                                <div class="d-flex justify-content-between">
+                                    <span>实际汇率:</span>
+                                    <span id="ratePreview">-</span>
+                                </div>
+                            </div>
+                            <div id="previewPlaceholder" class="text-center text-muted">
+                                <small>输入数量后显示交易预览</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">确认交换</button>
+                        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">返回面板</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const amountInput = document.getElementById('amount');
+        const token1ToToken2Radio = document.getElementById('token1ToToken2');
+        const token2ToToken1Radio = document.getElementById('token2ToToken1');
+        const previewContainer = document.getElementById('previewContainer');
+        const previewPlaceholder = document.getElementById('previewPlaceholder');
+        const inputPreview = document.getElementById('inputPreview');
+        const outputPreview = document.getElementById('outputPreview');
+        const feePreview = document.getElementById('feePreview');
+        const slippagePreview = document.getElementById('slippagePreview');
+        const ratePreview = document.getElementById('ratePreview');
+        
+        // 更新预览
+        function updatePreview() {
+            const amount = parseFloat(amountInput.value);
+            if (isNaN(amount) || amount <= 0) {
+                previewContainer.classList.add('d-none');
+                previewPlaceholder.classList.remove('d-none');
+                return;
+            }
+            
+            const swapType = token1ToToken2Radio.checked ? 'token1_to_token2' : 'token2_to_token1';
+            
+            fetch('/api/preview_swap', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    swap_type: swapType,
+                    amount: amount
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                previewContainer.classList.remove('d-none');
+                previewPlaceholder.classList.add('d-none');
+                
+                if (swapType === 'token1_to_token2') {
+                    inputPreview.textContent = `${data.input_amount.toFixed(4)} Token1`;
+                    outputPreview.textContent = `${data.output_amount.toFixed(4)} Token2`;
+                    feePreview.textContent = `${data.fee_amount.toFixed(4)} Token1`;
+                    slippagePreview.textContent = `${data.slippage.toFixed(2)}%`;
+                    ratePreview.textContent = `1 Token1 = ${data.exchange_rate.toFixed(4)} Token2`;
+                } else {
+                    inputPreview.textContent = `${data.input_amount.toFixed(4)} Token2`;
+                    outputPreview.textContent = `${data.output_amount.toFixed(4)} Token1`;
+                    feePreview.textContent = `${data.fee_amount.toFixed(4)} Token2`;
+                    slippagePreview.textContent = `${data.slippage.toFixed(2)}%`;
+                    ratePreview.textContent = `1 Token1 = ${(1/data.exchange_rate).toFixed(4)} Token2`;
+                }
+                
+                // 设置滑点的颜色
+                if (data.slippage > 5) {
+                    slippagePreview.className = 'text-danger';
+                } else if (data.slippage > 2) {
+                    slippagePreview.className = 'text-warning';
+                } else {
+                    slippagePreview.className = 'text-success';
+                }
+            })
+            .catch(error => {
+                console.error('预览请求失败:', error);
+            });
+        }
+        
+        // 监听输入变化
+        amountInput.addEventListener('input', updatePreview);
+        token1ToToken2Radio.addEventListener('change', updatePreview);
+        token2ToToken1Radio.addEventListener('change', updatePreview);
+    });
+</script>
+{% endblock %} 

@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    .chart-container {
+        position: relative;
+        height: 350px;
+        width: 100%;
+    }
+    .pool-chart-container {
+        height: 300px;
+    }
+    .chart-period-selector {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 100;
+        background-color: rgba(255, 255, 255, 0.7);
+        border-radius: 4px;
+        padding: 2px;
+    }
+</style>
+<!-- Plotly.js 已在 base.html 中加载 -->
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-4">
+        <div class="card shadow mb-4">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">用户信息</h4>
+            </div>
+            <div class="card-body">
+                <h5>{{ user.username }}</h5>
+                <p class="text-muted">{{ user.email }}</p>
+                <hr>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span>Token1 余额:</span>
+                    <span class="badge bg-success fs-6">{{ user.token1_balance|round(4) }}</span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>Token2 余额:</span>
+                    <span class="badge bg-info fs-6">{{ user.token2_balance|round(4) }}</span>
+                </div>
+                <div class="d-grid gap-2 mt-4">
+                    <a href="{{ url_for('swap') }}" class="btn btn-primary">交易代币</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow">
+            <div class="card-header bg-dark text-white">
+                <h4 class="mb-0">流动性池信息</h4>
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span>Token1 储备:</span>
+                    <span class="badge bg-success fs-6">{{ pool.token1_reserve|round(4) }}</span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span>Token2 储备:</span>
+                    <span class="badge bg-info fs-6">{{ pool.token2_reserve|round(4) }}</span>
+                </div>
+                <hr>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>当前汇率:</span>
+                    <span class="fw-bold">1 Token1 = {{ exchange_rate|round(4) }} Token2</span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                    <span>常数 k:</span>
+                    <span>{{ pool.product_constant|round(2) }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        <div class="card shadow mb-4">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">价格K线图</h4>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <div class="chart-period-selector btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-primary active" data-period="1h">小时线</button>
+                        <button type="button" class="btn btn-outline-primary" data-period="1d">日线</button>
+                    </div>
+                    <div id="kline-chart"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow mb-4">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">池子历史图表</h4>
+            </div>
+            <div class="card-body">
+                <div id="pool-chart" class="pool-chart-container"></div>
+            </div>
+        </div>
+
+        <div class="card shadow">
+            <div class="card-header bg-dark text-white">
+                <h4 class="mb-0">最近交易</h4>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>类型</th>
+                                <th>Token1 数量</th>
+                                <th>Token2 数量</th>
+                                <th>手续费</th>
+                                <th>滑点</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for tx in transactions %}
+                            <tr>
+                                <td>{{ tx.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>
+                                    {% if tx.transaction_type == 'token1_to_token2' %}
+                                    <span class="badge bg-primary">Token1 → Token2</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">Token2 → Token1</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ tx.token1_amount|round(4) }}</td>
+                                <td>{{ tx.token2_amount|round(4) }}</td>
+                                <td>{{ tx.fee_amount|round(4) }}</td>
+                                <td>{{ tx.slippage|round(2) }}%</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center">暂无交易记录</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 全局颜色定义
+    const upColor = '#198754';  // 绿色
+    const downColor = '#dc3545'; // 红色
+    
+    // 当前周期
+    let currentPeriod = '1h';
+    
+    // 加载K线图数据
+    function loadKlineData(period) {
+        fetch(`/api/kline_data?period=${period}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.length === 0) {
+                    document.getElementById('kline-chart').innerHTML = '<div class="alert alert-info">暂无K线数据</div>';
+                    return;
+                }
+                
+                // 格式化数据
+                const times = data.map(item => item.time);
+                const opens = data.map(item => item.open);
+                const highs = data.map(item => item.high);
+                const lows = data.map(item => item.low);
+                const closes = data.map(item => item.close);
+                const volumes = data.map(item => item.volume);
+                
+                // 创建K线图
+                const candlestickTrace = {
+                    x: times,
+                    open: opens,
+                    high: highs,
+                    low: lows,
+                    close: closes,
+                    type: 'candlestick',
+                    name: '价格',
+                    increasing: {line: {color: upColor}},
+                    decreasing: {line: {color: downColor}}
+                };
+                
+                // 创建成交量图
+                const volumeTrace = {
+                    x: times,
+                    y: volumes,
+                    type: 'bar',
+                    name: '成交量',
+                    yaxis: 'y2',
+                    marker: {
+                        color: closes.map((close, i) => {
+                            return i > 0 && close >= opens[i] ? upColor : downColor;
+                        })
+                    }
+                };
+                
+                // 计算移动平均线 MA9
+                const ma9 = calculateMA(closes, 9);
+                const ma9Trace = {
+                    x: times,
+                    y: ma9,
+                    type: 'scatter',
+                    mode: 'lines',
+                    line: {
+                        color: '#2962FF',
+                        width: 1
+                    },
+                    name: 'MA9'
+                };
+                
+                // 计算移动平均线 MA21
+                const ma21 = calculateMA(closes, 21);
+                const ma21Trace = {
+                    x: times,
+                    y: ma21,
+                    type: 'scatter',
+                    mode: 'lines',
+                    line: {
+                        color: '#FF6D00',
+                        width: 1
+                    },
+                    name: 'MA21'
+                };
+                
+                const layout = {
+                    title: period === '1h' ? '小时K线' : '日K线',
+                    dragmode: 'zoom',
+                    showlegend: true,
+                    xaxis: {
+                        rangeslider: {
+                            visible: false
+                        },
+                        type: 'category'
+                    },
+                    yaxis: {
+                        title: '价格',
+                        autorange: true,
+                        domain: [0.2, 1]
+                    },
+                    yaxis2: {
+                        title: '成交量',
+                        domain: [0, 0.2],
+                        showgrid: false
+                    },
+                    margin: {l: 50, r: 20, t: 40, b: 40}
+                };
+                
+                Plotly.newPlot('kline-chart', [candlestickTrace, volumeTrace, ma9Trace, ma21Trace], layout);
+            })
+            .catch(error => {
+                console.error('获取K线数据失败:', error);
+                document.getElementById('kline-chart').innerHTML = '<div class="alert alert-danger">获取数据失败</div>';
+            });
+    }
+    
+    // 计算移动平均线
+    function calculateMA(data, period) {
+        const result = [];
+        for (let i = 0; i < data.length; i++) {
+            if (i < period - 1) {
+                result.push(null);
+                continue;
+            }
+            
+            let sum = 0;
+            for (let j = 0; j < period; j++) {
+                sum += data[i - j];
+            }
+            result.push(sum / period);
+        }
+        return result;
+    }
+    
+    // 加载池子历史图表
+    function loadPoolHistory() {
+        fetch('/api/pool_history')
+            .then(response => response.json())
+            .then(data => {
+                if (data.length === 0) {
+                    document.getElementById('pool-chart').innerHTML = '<div class="alert alert-info">暂无历史数据</div>';
+                    return;
+                }
+                
+                const timestamps = data.map(item => item.timestamp);
+                const token1Data = data.map(item => item.token1_reserve);
+                const token2Data = data.map(item => item.token2_reserve);
+                const rateData = data.map(item => item.exchange_rate);
+                
+                const token1Trace = {
+                    x: timestamps,
+                    y: token1Data,
+                    name: 'Token1 储备',
+                    type: 'scatter',
+                    line: {color: '#198754'}
+                };
+                
+                const token2Trace = {
+                    x: timestamps,
+                    y: token2Data,
+                    name: 'Token2 储备',
+                    type: 'scatter',
+                    line: {color: '#0dcaf0'},
+                    yaxis: 'y2'
+                };
+                
+                const rateTrace = {
+                    x: timestamps,
+                    y: rateData,
+                    name: '汇率 (Token2/Token1)',
+                    type: 'scatter',
+                    line: {color: '#dc3545', dash: 'dot'},
+                    yaxis: 'y3'
+                };
+                
+                const layout = {
+                    title: '池子历史变化',
+                    showlegend: true,
+                    legend: {orientation: 'h', y: 1.1},
+                    margin: {l: 50, r: 50, t: 30, b: 50},
+                    xaxis: {title: '时间'},
+                    yaxis: {title: 'Token1', titlefont: {color: '#198754'}, tickfont: {color: '#198754'}},
+                    yaxis2: {
+                        title: 'Token2',
+                        titlefont: {color: '#0dcaf0'},
+                        tickfont: {color: '#0dcaf0'},
+                        overlaying: 'y',
+                        side: 'right',
+                        showgrid: false
+                    },
+                    yaxis3: {
+                        title: '汇率',
+                        titlefont: {color: '#dc3545'},
+                        tickfont: {color: '#dc3545'},
+                        overlaying: 'y',
+                        side: 'right',
+                        position: 0.85,
+                        showgrid: false
+                    }
+                };
+                
+                Plotly.newPlot('pool-chart', [token1Trace, token2Trace, rateTrace], layout);
+            })
+            .catch(error => {
+                console.error('获取池子历史数据失败:', error);
+                document.getElementById('pool-chart').innerHTML = '<div class="alert alert-danger">获取数据失败</div>';
+            });
+    }
+    
+    // 监听周期切换按钮
+    document.querySelectorAll('.chart-period-selector .btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            // 移除所有active类
+            document.querySelectorAll('.chart-period-selector .btn').forEach(b => {
+                b.classList.remove('active');
+            });
+            // 添加active到当前按钮
+            this.classList.add('active');
+            
+            // 加载相应周期的K线图
+            const period = this.dataset.period;
+            currentPeriod = period;
+            loadKlineData(period);
+        });
+    });
+    
+    // 初始化图表
+    loadKlineData('1h');
+    loadPoolHistory();
+});
+</script>
+{% endblock %} 
